@@ -38,11 +38,16 @@ def main():
         
         # External Macro Indicators
         "^VIX": "vix_volatility_index.csv",
+        "^VIX9D": "vix_9d_volatility.csv", # Short-term VIX
+        "^VIX3M": "vix_3m_volatility.csv", # Long-term VIX
         "^TNX": "10y_treasury_yield.csv",
         "DX-Y.NYB": "usd_index.csv",
         "^GSPC": "sp500_index.csv", # Broad Market Benchmark
         "CL=F": "crude_oil_futures.csv", # Energy/Inflation proxy
         "GC=F": "gold_futures.csv", # Safe haven proxy
+        "HG=F": "copper_futures.csv", # Economic health proxy
+        "HYG": "high_yield_bond_etf.csv", # Credit market stress
+        "XLU": "utilities_sector_etf.csv", # Defensive sector proxy
     }
     
     for ticker, filename in tickers.items():

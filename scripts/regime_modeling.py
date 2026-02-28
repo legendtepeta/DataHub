@@ -29,7 +29,7 @@ def plot_regimes(df, regime_col, title, output_path, states):
     price = df['Close'].values
     
     # Create line segments
-    points = np.array([df.index.to_numpy(dtype=float), price]).T.reshape(-1, 1, 2)
+    points = np.array([df.index.to_numpy(dtype=float), cum_ret.values]).T.reshape(-1, 1, 2)
     segments = np.concatenate([points[:-1], points[1:]], axis=1)
     
     # Define colors for up to 4 regimes
@@ -47,7 +47,12 @@ def plot_regimes(df, regime_col, title, output_path, states):
     ax = plt.gca()
     line = ax.add_collection(lc)
     
-    # Setup axis
+    # Setup axis with date formatting
+    import matplotlib.dates as mdates
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+    ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+    plt.xticks(rotation=45)
+    
     ax.autoscale()
     plt.title(title, fontsize=16)
     plt.ylabel('Nasdaq Futures Price (USD)', fontsize=12)

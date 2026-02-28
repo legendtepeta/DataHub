@@ -13,11 +13,16 @@ def load_and_merge_datasets(base_df):
     data_dir = "data/daily"
     external_files = {
         "VIX": "vix_volatility_index.csv",
+        "VIX9D": "vix_9d_volatility.csv",
+        "VIX3M": "vix_3m_volatility.csv",
         "TNX_10Y": "10y_treasury_yield.csv",
         "DXY": "usd_index.csv",
         "SPX": "sp500_index.csv",
         "Oil": "crude_oil_futures.csv",
         "Gold": "gold_futures.csv",
+        "Copper": "copper_futures.csv",
+        "HYG": "high_yield_bond_etf.csv",
+        "XLU": "utilities_sector_etf.csv",
         "Yield_Curve": "yield_curve_spread.csv",
         "Fed_Funds": "fed_funds_rate.csv",
         "CPI": "cpi.csv"
@@ -103,8 +108,24 @@ def engineer_features(df):
     df['Vol_21d'] = df['Log_Ret'].rolling(21).std() * np.sqrt(252)
     df['NATR_14'] = ta.natr(df['High'], df['Low'], df['Close'], length=14)
     
-    # Trend distances
+    # Trend distances & Death Cross
     df['Dist_SMA_200'] = (df['Close'] - ta.sma(df['Close'], length=200)) / ta.sma(df['Close'], length=200)
+    df['SMA_50_200_Cross'] = (ta.sma(df['Close'], length=50) - ta.sma(df['Close'], length=200)) / ta.sma(df['Close'], length=200)
+    
+    # Drawdown from 52-week High
+    high_252 = df['High'].rolling(252).max()
+    df['Drawdown_252'] = (df['Close'] - high_252) / high_252
+    
+    # Overnight Gap
+    df['Overnight_Gap'] = (df['Open'] - df['Close'].shift(1)) / df['Close'].shift(1)
+    
+    # Return / Risk (Sharpe Proxy)
+    rolling_ret_21 = df['Log_Ret'].rolling(21).mean()
+    rolling_vol_21 = df['Log_Ret'].rolling(21).std()
+    df['Return_Risk_21'] = rolling_ret_21 / rolling_vol_21
+    
+    # Consecutive Negative Days
+    df['Negative_Days_21'] = (df['Log_Ret'] < 0).rolling(21).sum()
     
     # ADX / RSI
     adx = ta.adx(df['High'], df['Low'], df['Close'], length=14)
@@ -123,14 +144,20 @@ def engineer_features(df):
     df['Log_Ret_Kurt_63'] = df['Log_Ret'].rolling(63).kurt()
     
     # 2. External Macro Interactions
-    # VIX Ratio (Current vs Mean) - High ratio = fear spike
+    # VIX Ratio & Term Structure
     if 'Ext_VIX' in df.columns:
         df['VIX_Relative'] = df['Ext_VIX'] / df['Ext_VIX'].rolling(252).mean()
         df['VIX_Relative_ROC_21'] = df['VIX_Relative'].pct_change(21)
+        
+    if 'Ext_VIX9D' in df.columns and 'Ext_VIX3M' in df.columns:
+        df['VIX_Term_Structure'] = df['Ext_VIX9D'] / df['Ext_VIX3M'] # Backwardation indicator
     
-    # Yield Curve Slope (10Y - 3M approximation)
+    # Yield Curve Slope & High Yield Spreads
     if 'Ext_Yield_Curve' in df.columns:
         df['Macro_Yield_Curve'] = df['Ext_Yield_Curve']
+        
+    if 'Ext_HYG' in df.columns:
+        df['HYG_Ret_21'] = df['Ext_HYG'].pct_change(21) # Credit market stress
     
     # Correlation and Beta to SPX
     if 'Ext_SPX' in df.columns:
@@ -141,10 +168,16 @@ def engineer_features(df):
         var_spx = spx_log_ret.rolling(21).var()
         df['Beta_SPX_21'] = cov_spx / var_spx
     
-    # Commodity Ratios
+    # Sector & Commodity Ratios
     if 'Ext_Gold' in df.columns and 'Ext_Oil' in df.columns:
         df['Gold_Oil_Ratio'] = df['Ext_Gold'] / df['Ext_Oil'] # Safe haven vs Energy
         df['Gold_Oil_Ratio_ROC_21'] = df['Gold_Oil_Ratio'].pct_change(21)
+        
+    if 'Ext_Copper' in df.columns and 'Ext_Oil' in df.columns:
+        df['Copper_Oil_Ratio'] = df['Ext_Copper'] / df['Ext_Oil'] # Economic health vs Energy
+
+    if 'Ext_XLU' in df.columns:
+        df['Tech_Util_Ratio'] = df['Close'] / df['Ext_XLU'] # Risk-on vs Defensive
     
     # 4. Tail Risk & Market Microstructure
     df['Ret_ZScore_252'] = (df['Log_Ret'] - df['Log_Ret'].rolling(252).mean()) / df['Log_Ret'].rolling(252).std()

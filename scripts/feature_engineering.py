@@ -46,7 +46,9 @@ def load_and_merge_datasets(base_df):
                 val_col = [c for c in ext_df.columns if c != 'Date'][0]
                 ext_col = ext_df[val_col].rename(f'Ext_{name}')
             
-            merged_df = merged_df.join(ext_col, how='left').ffill()
+            # Left join and ONLY ffill the newly joined column to prevent data leakage
+            merged_df = merged_df.join(ext_col, how='left')
+            merged_df[f'Ext_{name}'] = merged_df[f'Ext_{name}'].ffill()
             
     return merged_df
 
@@ -57,21 +59,22 @@ def engineer_complex_features(df):
     print("Calculating complex statistical features...")
     window = 63 # Quarter lookback for stable stats
     
-    # Pre-allocate
-    df['Hurst_63'] = np.nan
-    df['Entropy_63'] = np.nan
-    
     closes = df['Close'].values
     log_rets = df['Log_Ret'].values
     
+    hurst_vals = [np.nan] * window
+    entropy_vals = [np.nan] * window
+    
+    # O(N) Loop optimized using lists instead of expensive pd.DataFrame.iloc assignment
     for i in range(window, len(df)):
         window_closes = closes[i-window:i]
         window_rets = log_rets[i-window:i]
         
-        # Hurst
-        df.iloc[i, df.columns.get_loc('Hurst_63')] = get_hurst_exponent(window_closes)
-        # Entropy
-        df.iloc[i, df.columns.get_loc('Entropy_63')] = calculate_entropy(window_rets)
+        hurst_vals.append(get_hurst_exponent(window_closes))
+        entropy_vals.append(calculate_entropy(window_rets))
+        
+    df['Hurst_63'] = hurst_vals
+    df['Entropy_63'] = entropy_vals
         
     return df
 
@@ -108,30 +111,49 @@ def engineer_features(df):
     if adx is not None:
         df['ADX_14'] = adx['ADX_14']
     df['RSI_14'] = ta.rsi(df['Close'], length=14)
+
+    # Volume Profile: VWMA Distance and OBV
+    vwma_21 = ta.vwma(df['Close'], df['Volume'], length=21)
+    df['Dist_VWMA_21'] = (df['Close'] - vwma_21) / vwma_21
+    df['OBV'] = ta.obv(df['Close'], df['Volume'])
+    df['OBV_ROC_21'] = df['OBV'].pct_change(21)
+    
+    # Higher-Order Moments (Skewness & Kurtosis)
+    df['Log_Ret_Skew_63'] = df['Log_Ret'].rolling(63).skew()
+    df['Log_Ret_Kurt_63'] = df['Log_Ret'].rolling(63).kurt()
     
     # 2. External Macro Interactions
     # VIX Ratio (Current vs Mean) - High ratio = fear spike
-    df['VIX_Relative'] = df['Ext_VIX'] / df['Ext_VIX'].rolling(252).mean()
+    if 'Ext_VIX' in df.columns:
+        df['VIX_Relative'] = df['Ext_VIX'] / df['Ext_VIX'].rolling(252).mean()
+        df['VIX_Relative_ROC_21'] = df['VIX_Relative'].pct_change(21)
     
     # Yield Curve Slope (10Y - 3M approximation)
-    # Using the FRED yield curve spread directly if it exists
     if 'Ext_Yield_Curve' in df.columns:
         df['Macro_Yield_Curve'] = df['Ext_Yield_Curve']
     
-    # Correlation to SPX (Realized Beta proxy)
-    df['Beta_SPX_21'] = df['Log_Ret'].rolling(21).corr(np.log(df['Ext_SPX'] / df['Ext_SPX'].shift(1)))
+    # Correlation and Beta to SPX
+    if 'Ext_SPX' in df.columns:
+        spx_log_ret = np.log(df['Ext_SPX'] / df['Ext_SPX'].shift(1))
+        df['Corr_SPX_21'] = df['Log_Ret'].rolling(21).corr(spx_log_ret)
+        
+        cov_spx = df['Log_Ret'].rolling(21).cov(spx_log_ret)
+        var_spx = spx_log_ret.rolling(21).var()
+        df['Beta_SPX_21'] = cov_spx / var_spx
     
     # Commodity Ratios
-    df['Gold_Silver_Proxy'] = df['Ext_Gold'] / df['Ext_Oil'] # Safe haven vs Energy
+    if 'Ext_Gold' in df.columns and 'Ext_Oil' in df.columns:
+        df['Gold_Oil_Ratio'] = df['Ext_Gold'] / df['Ext_Oil'] # Safe haven vs Energy
+        df['Gold_Oil_Ratio_ROC_21'] = df['Gold_Oil_Ratio'].pct_change(21)
     
     # 4. Tail Risk & Market Microstructure
     df['Ret_ZScore_252'] = (df['Log_Ret'] - df['Log_Ret'].rolling(252).mean()) / df['Log_Ret'].rolling(252).std()
     df['Vol_ZScore_21'] = (df['Volume'] - df['Volume'].rolling(21).mean()) / df['Volume'].rolling(21).std()
     
     # 5. Macro "Event" Flags
-    # Identify days with extreme changes in Fed Funds or DXY as proxies for macro events
-    df['DXY_Change'] = df['Ext_DXY'].pct_change()
-    df['Macro_Volatility_Event'] = (df['DXY_Change'].abs() > df['DXY_Change'].abs().rolling(252).quantile(0.95)).astype(int)
+    if 'Ext_DXY' in df.columns:
+        df['DXY_Change'] = df['Ext_DXY'].pct_change()
+        df['Macro_Volatility_Event'] = (df['DXY_Change'].abs() > df['DXY_Change'].abs().rolling(252).quantile(0.95)).astype(int)
 
     return df
 

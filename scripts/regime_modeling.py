@@ -20,16 +20,16 @@ def create_directory_structure():
 
 def plot_regimes(df, regime_col, title, output_path, states):
     """
-    Plots the cumulative return of the underlying asset, 
+    Plots the closing price of the underlying asset, 
     color-coded by the identified market regime.
     """
     plt.figure(figsize=(15, 8))
     
-    # Calculate cumulative return series
-    cum_ret = (1 + df['Log_Ret']).cumprod()
+    # Use actual Close price for plotting
+    price = df['Close'].values
     
     # Create line segments
-    points = np.array([df.index.to_numpy(dtype=float), cum_ret.values]).T.reshape(-1, 1, 2)
+    points = np.array([df.index.to_numpy(dtype=float), price]).T.reshape(-1, 1, 2)
     segments = np.concatenate([points[:-1], points[1:]], axis=1)
     
     # Define colors for up to 4 regimes
@@ -50,8 +50,7 @@ def plot_regimes(df, regime_col, title, output_path, states):
     # Setup axis
     ax.autoscale()
     plt.title(title, fontsize=16)
-    plt.ylabel('Cumulative Return (Log Scale)', fontsize=12)
-    plt.yscale('log')
+    plt.ylabel('Nasdaq Futures Price (USD)', fontsize=12)
     plt.grid(True, alpha=0.3)
     
     # Add colorbar / legend
